@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>WebGL Running Test</title>
+  <meta name="description" content="WebGL">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link rel="stylesheet" href="css/main.css">
+
+  <script type="x-shader/x-vertex" id="earthVertexShader">
+
+    uniform vec3 lightDirection;
+
+    varying vec2 vUv;
+    varying vec3 vEyeDirectionEyeSpace;
+    varying vec3 vLightDirection;
+    attribute vec4 tangent;
+
+    // all in eye space
+    varying mat3 tbn;
+
+    void main(){
+
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+      vLightDirection = mat3(viewMatrix) * lightDirection; // should be computed outside of shader
+      vEyeDirectionEyeSpace = mat3(viewMatrix) * normalize(position - cameraPosition).xyz;
+
+      // normal mapping
+      vec3 t = normalize(tangent.xyz);
+      vec3 n = normalize(normal.xyz);
+      vec3 b = normalize(cross(t, n));
+
+      // everything in eye space
+      t = normalize(normalMatrix * t);
+      b = normalize(normalMatrix * b);
+      n = normalize(normalMatrix * n);
+
+      tbn = mat3(t, b, n);
+
+    }
+
+  </script>
+
+  <script type="x-shader/x-fragment" id="earthFragmentShader">
+
+    uniform sampler2D diffuseTexture;
+    uniform sampler2D diffuseNight;
+    uniform sampler2D specularMap;
+    uniform sampler2D cloudsMap;
+    uniform sampler2D normalMap;
+    uniform float cloudsBlend;
+
+    varying vec2 vUv;
+    varying vec3 vEyeDirectionEyeSpace;
+    varying vec3 vLightDirection;
+
+    // tangent-bitangent-normal matrix
+    varying mat3 tbn;
+
+    void main(){
+
+      vec3 lightDir = normalize(vLightDirection);
+
+      vec3 n = texture2D(normalMap, vUv).xyz * 2.0 - 1.0;
+      vec3 normal = normalize(tbn * n);
+
+      // directional light
+      float lightIntensity = dot(normal, lightDir);
+      float selectImage = dot(tbn[2], lightDir);
+
+      gl_FragColor = texture2D(diffuseTexture, vUv) * selectImage + texture2D(diffuseNight, vUv) * (1.0-selectImage);
+
+      //gl_FragColor = vec4(vec3(0.5), 1.0 );
+      gl_FragColor *= (1.0 + 10.0*(lightIntensity - selectImage));
+
+      // specular
+      vec3 reflection = reflect(lightDir, normal);
+      float specPower = texture2D(specularMap, vUv).r;
+
+      float spec = 4.0;
+      float gloss = 2.0 * texture2D(specularMap, vUv).a;
+
+      float specular =  pow(clamp(dot(reflection, normalize(vEyeDirectionEyeSpace)), 0.0, 1.0), spec) * gloss;
+      gl_FragColor = gl_FragColor + specular * vec4(0.26, 0.96, 0.99, 1);
+
+
+      // cloud colors + a small bump
+      vec4 cloudsColor = texture2D(cloudsMap, vUv) * vec4(1.0, 0.5, 0.2, 1.0);
+
+      vec4 cloudsShadow = texture2D(cloudsMap, vec2(vUv.x+ normal.x * 0.005, vUv.y + normal.y * 0.005));
+
+      if (cloudsColor.r < 0.1 && cloudsShadow.r > 0.1){
+        gl_FragColor *= 0.75;
+        cloudsShadow = vec4(0);
+      }
+
+      gl_FragColor = gl_FragColor * (vec4(1.0) - cloudsColor) + cloudsColor * (lightIntensity * 2.0);
+
+    }
+
+  </script>
+
+  <script type="x-shader/x-vertex" id="atmosphereVertexShader">
+
+    uniform vec3 earthCenter;
+    uniform float earthRadius;
+    uniform float atmosphereRadius;
+    uniform vec3 lightDirection;
+
+    varying float atmosphereThickness;
+    varying vec3 vLightDirection;
+    varying vec3 vNormalEyeSpace;
+
+
+    void main(){
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+      // https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection
+
+      vec3 positionW = (modelMatrix * vec4(position, 1.0)).xyz;
+
+      vec3 vCameraEarth = cameraPosition.xyz - earthCenter;
+      vec3 vCameraVertex = normalize(cameraPosition.xyz - positionW);
+
+      float tca = dot(vCameraEarth,  vCameraVertex);
+
+      if (tca < 0.0){
+        // not intesect, looking in opposite direction
+        atmosphereThickness = 0.0;
+        return;
+      }
+
+      float dsq = dot(vCameraEarth, vCameraEarth) - tca * tca;
+      float thc_sq_atmosphere = max(atmosphereRadius * atmosphereRadius - dsq, 0.0);
+      float thc_sq_earth = max(earthRadius * earthRadius - dsq, 0.0);
+
+      float thc_atmosphere = 2.0 * sqrt(thc_sq_atmosphere);
+      float thc_earth = 2.0 * sqrt(max(0.0,thc_sq_earth));
+
+      float thc = (thc_atmosphere - thc_earth) * 0.12; // 0.01 - density factor
+      atmosphereThickness = thc;
+
+      // light calculation
+      vLightDirection = mat3(viewMatrix) * lightDirection;
+      vNormalEyeSpace = normalize(normalMatrix * normal);
+
+    }
+
+
+  </script>
+
+  <script type="x-shader/x-fragment" id="atmosphereFragmentShader">
+
+    varying float atmosphereThickness;
+    varying vec3 vLightDirection;
+    varying vec3 vNormalEyeSpace;
+
+    // tangent - bitangent - normal mtx
+    varying mat3 tbn;
+
+    void main(){
+
+      vec3 lightDir = normalize(vLightDirection);
+      vec3 normal = normalize(vNormalEyeSpace);
+      float lightIntensity = max(dot(normal, lightDir) * 1.5, -0.7);
+      gl_FragColor = vec4( (vec3(57.0, 97.0, 162.0) / 256.0) * (1.0 + lightIntensity), atmosphereThickness);
+
+    }
+  </script>
+
+  <script type="x-shader/x-vertex" id="skyBoxVertexShader">
+
+    uniform vec3          lightDirection;
+    uniform vec3          cameraDirection;
+    varying vec2          vUv; // pass the uv coordinates of each vertex to the frag shader
+    varying float         lightIntensity;
+
+    void main()
+    {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+      // dim when looking at the light source -> this should be computed outside the shader
+      float i = dot(normalize(cameraDirection), normalize(lightDirection));
+      lightIntensity = clamp(i * i, 0.4, 1.0);
+    }
+  </script>
+
+  <script type="x-shader/x-fragment" id="skyBoxFragmentShader">
+    uniform sampler2D diffuseTexture;
+    varying vec2 vUv;
+    varying float lightIntensity;
+
+    void main()
+    {
+      gl_FragColor = texture2D(diffuseTexture, vUv) * lightIntensity;
+    }
+  </script>
+
+  <script type="module">
+
+    import {main, resize} from "./js/complex_scene.js";
+
+    window.onload = main;
+    window.onresize = resize;
+
+  </script>
+
+</head>
+
+<body>
+  <!-- Add your site or application content here -->
+  <div id="webgl-container" style="position: absolute; top: 0; margin: 0"></div>
+
+</body>
+
+</html>
