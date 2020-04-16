@@ -3,8 +3,9 @@ import * as THREE from "./libs/three.module.js"
 import {FlyControls} from "./libs/FlyControls.js";
 import {BufferGeometryUtils} from "./libs/BufferGeometryUtils.js";
 
-const renderer = new THREE.WebGLRenderer({alpha: false}), clock = new THREE.Clock(true);
-let rtTexture = null;
+const renderer = new THREE.WebGLRenderer();
+const clock = new THREE.Clock(true);
+
 let scene = null;
 let camera = null;
 let skybox = null
@@ -180,7 +181,7 @@ async function fixMaterials() {
     depthWrite: false,
 
     // always inside the box
-    side: THREE.DoubleSide,
+    side: THREE.BackSide,
 
   });
 
@@ -255,8 +256,6 @@ async function main() {
     renderer.autoClear = false;
     scene.background = null;
 
-    // render to texture first
-    rtTexture = new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter, format: THREE.RGBFormat } );
     render()
 });
 

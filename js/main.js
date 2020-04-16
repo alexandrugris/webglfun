@@ -79,10 +79,6 @@ class AnimatedPlaneGeometry extends THREE.Mesh{
       this.geometry.vertices[i].z = Math.sin(this.geometry.vertices[i].x + dt)
     }
 
-    // TODO: check GeometryUtils
-
-    new THREE.GeometryUtils.crossVectors()
-
     // TODO: must call the following to update the geometry
     this.geometry.verticesNeedUpdate = true;
   }

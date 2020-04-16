@@ -52,7 +52,6 @@
     uniform sampler2D specularMap;
     uniform sampler2D cloudsMap;
     uniform sampler2D normalMap;
-    uniform float cloudsBlend;
 
     varying vec2 vUv;
     varying vec3 vEyeDirectionEyeSpace;
@@ -86,7 +85,6 @@
 
       float specular =  pow(clamp(dot(reflection, normalize(vEyeDirectionEyeSpace)), 0.0, 1.0), spec) * gloss;
       gl_FragColor = gl_FragColor + specular * vec4(0.26, 0.96, 0.99, 1);
-
 
       // cloud colors + a small bump
       vec4 cloudsColor = texture2D(cloudsMap, vUv) * vec4(1.0, 0.5, 0.2, 1.0);
@@ -159,9 +157,6 @@
     varying vec3 vLightDirection;
     varying vec3 vNormalEyeSpace;
 
-    // tangent - bitangent - normal mtx
-    varying mat3 tbn;
-
     void main(){
 
       vec3 lightDir = normalize(vLightDirection);
@@ -214,7 +209,7 @@
 
 <body>
   <!-- Add your site or application content here -->
-  <div id="webgl-container" style="position: absolute; top: 0; margin: 0"></div>
+  <div id="webgl-container" style="position: absolute; top: 0; left:0 ; margin: 0"></div>
 
 </body>
 
