@@ -106,11 +106,16 @@
 
     ]
 
-    cameraDir = [-z[0], -z[1], -z[2]];
+    cameraDir = [z[0], z[1], z[2]];
 
     let ret = inverseOrthogonalMatrix(camWorld);
     //let identity = matrixMultiply(ret, camWorld); // debug
     return ret;
+  }
+
+  function makeIdentityCamMatrix(){
+    cameraDir = [0, 0, 1];
+    return getIdentityMatrix(4);
   }
 
   function makeProjectionTransform(closeness_z){
@@ -316,7 +321,6 @@
           }
         }
       }
-
   }
 
   function drawLineV(v1, v2, r, g, b){
@@ -421,7 +425,7 @@
                       subtractVector(varrayW[v1], varrayW[v0])
                     ));
 
-       let visible = dot(cameraDir, faceNormal) >= 0;
+       let visible = dot(cameraDir, faceNormal) <= 0;
 
        if(visible || wireframe) {
          triangles.push([varray[v0], varray[v1], varray[v2], vn0, vn1, vn2, tx0, tx1, tx2]);
@@ -481,14 +485,12 @@
     mesh.vnormals.push([0, 0, 1]);
     mesh.vnormals.push([0, 0, 1]);
 
-    if(mesh.worldTransform === undefined)
+    if(mesh.worldTransform === undefined || mesh.worldTransform == null)
       mesh.worldTransform = getIdentityMatrix(4);
 
   }
 
   async function loadAsset(diffuse, obj) {
-
-    let txt = (await obj.text()).split('\n');
 
     myMesh = {
       vertices: [],
@@ -496,11 +498,13 @@
       vnormals: [],
       faces: [],
       diffuse: diffuse,
-      worldTransform: rotateTranslate([0, 1, 0], [1, 0, 1], [0, 0, -2]),
+      worldTransform: rotateTranslate([0, 1, 0], [0.3, 0.3, 0.7], [0, 0, 0]),
     };
 
     //generateTexturedQuad(myMesh);
     //return;
+
+    let txt = (await obj.text()).split('\n');
 
     txt.forEach((line) => {
       let ln = line.split(' ').filter( w => w.length > 0);
