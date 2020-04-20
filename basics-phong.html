@@ -50,14 +50,11 @@
     y = crossProduct3(z, x);
 
     return [
-
       x[0], y[0], z[0], t[0],
       x[1], y[1], z[1], t[1],
       x[2], y[2], z[2], t[2],
       0, 0, 0, 1,
-
     ]
-
   }
 
   function inverseOrthogonalMatrix(mtx){
@@ -76,17 +73,14 @@
     ];
 
     let translate = [
-
       1, 0, 0, -x[3],
       0, 1, 0, -y[3],
       0, 0, 1, -z[3],
       0, 0, 0, 1
-
     ]
 
     // inverse = a) -translate followed by b) -rotate
     return matrixMultiply(rotate, translate);
-
   }
 
   function makeCameraTransform(camPos, camUp, camLookAt){
@@ -98,12 +92,10 @@
     y = crossProduct3(z, x);
 
     let camWorld = [
-
       x[0], y[0], z[0], camPos[0],
       x[1], y[1], z[1], camPos[1],
       x[2], y[2], z[2], camPos[2],
       0,    0,    0,    1,
-
     ]
 
     cameraDir = [z[0], z[1], z[2]];
@@ -203,7 +195,6 @@
       ret.push(v[3] < 1e-5? 0 : 1); // direction : position
 
     return ret;
-
   }
 
 
@@ -215,7 +206,6 @@
     screenBuffer.data[idx + 1] = g;
     screenBuffer.data[idx + 2] = b;
     screenBuffer.data[idx + 3] = 0xff;
-
   }
 
   function drawLine(x0, y0, x1, y1, r, g, b) {
@@ -253,7 +243,6 @@
     const t = 1/(2*Area)*(p0x*p1y - p0y*p1x + (p0y - p1y)*px + (p1x - p0x)*py);
 
     return [1-s-t, s, t];
-
   }
 
   function insideTriangle(s, t, u){
@@ -359,7 +348,7 @@
     let ret = new Array(n*n);
     for(let i = 0; i < n; i ++){
       for(let j = 0; j < n; j++){
-        ret[i*n + j] = (i == j)? 1 : 0;
+        ret[i*n + j] = (i === j)? 1 : 0;
       }
     }
     return ret;
@@ -559,12 +548,12 @@
 
       img.onload = function () {
 
-        var canvas = document.createElement('canvas');
-        var context = canvas.getContext('2d');
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
         context.drawImage(img, 0, 0 );
-        var myData = context.getImageData(0, 0, img.width, img.height);
+        const myData = context.getImageData(0, 0, img.width, img.height);
 
         resolve(myData);
 
