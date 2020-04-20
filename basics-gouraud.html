@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Graphics Basics</title>
+</head>
+<body>
+
+<canvas id="myCanvas" style="position: absolute; top: 0; left:0; margin: 0">
+</canvas>
+
+<script>
+
+  let myMesh = null;
+  let viewportTransform = null;
+  let projectionTransform = null;
+  let cameraTransform = null;
+  let lightDir = [0, 0, -1];
+  let cameraDir = null;
+
+  let screenBuffer = null;
+  let zBuffer = null;
+
+  /**
+   * Transforms from [-1..1] to [0, w] and [h, 0] respectively.
+   */
+  function makeViewportTransform(viewportWidth, viewportHeight){
+    // maintain aspect ratio
+    return [
+      viewportHeight/2, 0, 0, viewportWidth/2,
+      0, -viewportHeight/2, 0, viewportHeight/2,
+      // spread a bit the numbers in the zbuffer (can be 1, but let's make it more discrete).
+      // This is useful it we want to store the zbuffer as an integer instead of a float.
+      // This would give the resolution of the depth buffer, mapping -1, 1]
+      0, 0, 1024, 1024,
+      0, 0, 0, 1
+    ]
+  }
+
+  function getAxis(mtx, axis){
+    return [mtx[axis], mtx[axis+4], mtx[axis + 8]]
+  }
+
+  function rotateTranslate(vUp, vDirOfZAxis, t){
+
+    let z = normalize(vDirOfZAxis);
+    let y = normalize(vUp);
+
+    let x = crossProduct3(y, z);
+    y = crossProduct3(z, x);
+
+    return [
+
+      x[0], y[0], z[0], t[0],
+      x[1], y[1], z[1], t[1],
+      x[2], y[2], z[2], t[2],
+      0, 0, 0, 1,
+
+    ]
+
+  }
+
+  function inverseOrthogonalMatrix(mtx){
+
+    // inverse is the transpose of the rotation part and `-` the translation
+
+    let x = mtx.slice(0, 4);
+    let y = mtx.slice(4, 8);
+    let z = mtx.slice(8, 12);
+
+    let rotate = [
+      x[0], y[0], z[0], 0,
+      x[1], y[1], z[1], 0,
+      x[2], y[2], z[2], 0,
+      0,    0,    0,    1
+    ];
+
+    let translate = [
+
+      1, 0, 0, -x[3],
+      0, 1, 0, -y[3],
+      0, 0, 1, -z[3],
+      0, 0, 0, 1
+
+    ]
+
+    // inverse = a) -translate followed by b) -rotate
+    return matrixMultiply(rotate, translate);
+
+  }
+
+  function makeCameraTransform(camPos, camUp, camLookAt){
+
+    // camera looks towards -z, so here we need to inverse camCenter and camPos
+    let z = normalize(subtractVector(camPos, camLookAt))
+    let y = normalize(camUp);
+    let x = crossProduct3(y, z);
+    y = crossProduct3(z, x);
+
+    let camWorld = [
+
+      x[0], y[0], z[0], camPos[0],
+      x[1], y[1], z[1], camPos[1],
+      x[2], y[2], z[2], camPos[2],
+      0,    0,    0,    1,
+
+    ]
+
+    cameraDir = [-z[0], -z[1], -z[2]];
+
+    let ret = inverseOrthogonalMatrix(camWorld);
+    //let identity = matrixMultiply(ret, camWorld); // debug
+    return ret;
+  }
+
+  function makeProjectionTransform(closeness_z){
+    return[
+      1, 0, 0 ,0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, -1/closeness_z, 1
+    ];
+  }
+
+  function dot(v1, v2){
+    let ret = 0;
+    for(let i = 0; i < v1.length; i++){
+      ret += v1[i] * v2[i]
+    }
+    return ret;
+  }
+
+  function matrixMultiply(m1, m2){
+
+    let l = (m1.length === 9)? 3 : 4;
+    let ret = new Array(l * l);
+
+    for (let i = 0; i < l; i++)
+      for (let j = 0; j < l; j++){
+        let v = 0;
+        for (let k = 0; k < l; k++) {
+          v+= m1[l * i + k] * m2[j + l * k]
+        }
+        ret[i * l + j] = v;
+      }
+
+    return ret;
+  }
+
+  // set isPosition to true to allow translations, for vectors that represent positions
+  // set isPosition to false to only rotate, for vectors that represent normals
+  function vectorMultiply(mtx, v, isPosition=true){
+
+    if (mtx.length === 16 && v.length === 3){
+      v = [v[0], v[1], v[2], isPosition? 1 : 0];
+    }
+
+    let ret = [];
+    let start = 0;
+    for(let i = 0; i < v.length; i++){
+      ret.push(dot(mtx.slice(start, start+v.length), v));
+      start += v.length
+    }
+    return ret;
+  }
+
+  /*
+  Homogeneous coordinates [x, y, z, w] allow to distinguish between a vector and a point.
+  If a programmer writes vec3(x,y, z), is it a vector or a point? Hard to say.
+  In homogeneous coordinates all things with w=0 are vectors,
+  all the rest are points. vector + vector = vector. Vector - vector = vector. Point + vector = point.
+   */
+  function subtractVector(v1,  v2){
+    let ret = []
+    for (let i = 0; i < v1.length; i++){
+      ret.push(v1[i] - v2[i]);
+    }
+    return ret;
+  }
+
+  function crossProduct3(v1, v2){
+    let cross = [0, 0, 0];
+
+    cross[0] = v1[1] * v2[2] - v1[2] * v2[1];
+    cross[1] = v1[2] * v2[0] - v1[0] * v2[2];
+    cross[2] = v1[0] * v2[1] - v1[1] * v2[0];
+
+    return cross;
+  }
+
+  function normalize(v){
+
+    let vs = v.slice(0, 3);
+    let l = Math.sqrt(dot(vs, vs));
+    let ret = [v[0] / l, v[1] / l, v[2] / l];
+
+    if(v.length === 4)
+      ret.push(v[3] < 1e-5? 0 : 1); // direction : position
+
+    return ret;
+
+  }
+
+
+  function putPixel(x, y, r=0xff, g=0x00, b=0x00) {
+
+    const idx = (Math.round(y) * screenBuffer.width + Math.round(x)) * 4;
+
+    screenBuffer.data[idx + 0] = r;
+    screenBuffer.data[idx + 1] = g;
+    screenBuffer.data[idx + 2] = b;
+    screenBuffer.data[idx + 3] = 0xff;
+
+  }
+
+  function drawLine(x0, y0, x1, y1, r, g, b) {
+
+    // no line
+    if (x0 === x1 && y1 === y0)
+      return;
+
+    // step
+    let step = 1.0 / Math.max(Math.abs(x0 - x1), Math.abs(y0 - y1));
+
+    for(let i = 0; i <= 1; i+= step){
+      let x = x0 + i * (x1-x0);
+      let y = y0 + i * (y1-y0);
+      putPixel(x, y, r, g, b);
+    }
+  }
+
+  function toBarycentricCoords(x, y, v1, v2, v3){
+
+    // barycentric coordinates
+    // https://en.wikipedia.org/wiki/Barycentric_coordinate_system
+
+    const px = x;
+    const py = y;
+    const p0x = v1[0];
+    const p0y = v1[1];
+    const p1x = v2[0];
+    const p1y = v2[1];
+    const p2x = v3[0];
+    const p2y = v3[1];
+
+    const Area = 0.5 *(-p1y*p2x + p0y*(-p1x + p2x) + p0x*(p1y - p2y) + p1x*p2y);
+    const s = 1/(2*Area)*(p0y*p2x - p0x*p2y + (p2y - p0y)*px + (p0x - p2x)*py);
+    const t = 1/(2*Area)*(p0x*p1y - p0y*p1x + (p0y - p1y)*px + (p1x - p0x)*py);
+
+    return [1-s-t, s, t];
+
+  }
+
+  function insideTriangle(s, t, u){
+    return s >= 0 && t>=0 && u >=0;
+  }
+
+  function getTextureData(tx, ty){
+
+    if (myMesh.diffuse === undefined)
+      return [0xff, 0xff, 0xff];
+
+    tx = Math.round(tx * myMesh.diffuse.width);
+    ty = Math.round((1.0-ty) * myMesh.diffuse.height);
+
+    let coords = (ty * myMesh.diffuse.width + tx) * 4;
+    return [myMesh.diffuse.data[coords],  myMesh.diffuse.data[coords + 1], myMesh.diffuse.data[coords + 2]]
+  }
+
+  function drawTriangle(v1, v2, v3, vn1, vn2, vn3, tx0, tx1, tx2){
+
+    // find the bounding box
+    // TODO: add screen check, no need to t
+
+    let bb = [v1[0], v1[1], v1[0], v1[1]];
+    let v = [v2, v3];
+    for (let i = 0; i < v.length; i++){
+      bb[0] = Math.floor(Math.min(bb[0], v[i][0]));
+      bb[1] = Math.floor(Math.min(bb[1], v[i][1]));
+      bb[2] = Math.ceil(Math.max(bb[2], v[i][0]));
+      bb[3] = Math.ceil(Math.max(bb[3], v[i][1]));
+    }
+
+    // check if the point is inside the triangle
+    for(let i = bb[0]; i <= bb[2]; i++)
+      for(let j = bb[1]; j <= bb[3]; j++){
+
+        const stu = toBarycentricCoords(i, j, v1, v2, v3);
+
+        if(insideTriangle(stu[0], stu[1], stu[2])) {
+          // interpolate over the z coord
+
+          const pixelZWorld = stu[0] * v1[2] + stu[1] * v2[2] + stu[2] * v3[2];
+          const zBufferIndex = zBufferGetIdx(i, j);
+
+          if (pixelZWorld >= zBuffer[zBufferIndex]){
+            zBuffer[zBufferIndex] = pixelZWorld;
+
+            // use again the barycentric coords to interpolate in the texture
+            // matrix multiplication STU * [tx0, tx1, tx2]
+            const tX = dot(stu, [tx0[0], tx1[0], tx2[0]]);
+            const tY = dot(stu, [tx0[1], tx1[1], tx2[1]]);
+
+            [tr, tg, tb] = getTextureData(tX, tY);
+
+            // interpolate normals (all in world space)
+            const n0 = dot(stu, [vn1[0], vn2[0], vn3[0]]);
+            const n1 = dot(stu, [vn1[1], vn2[1], vn3[1]]);
+            const n2 = dot(stu, [vn1[2], vn2[2], vn3[2]]);
+
+            let intensity = -dot(lightDir, [n0, n1, n2]);
+            let c = Math.max(0, intensity);
+
+            putPixel(i, j, c * tr, c * tg, c * tb);
+            //putPixel(i, j, 255 * c , 255 * c , 255 * c ); // draw only the light intensity
+          }
+        }
+      }
+
+  }
+
+  function drawLineV(v1, v2, r, g, b){
+    drawLine(v1[0], v1[1], v2[0], v2[1], r, g, b);
+  }
+
+  function zBufferGetIdx(x, y){
+    return screenBuffer.width * Math.round(y) + Math.round(x);
+  }
+
+  function clear(r, g, b){
+    for(let i = 0; i < screenBuffer.data.length; i+= 4){
+      screenBuffer.data[i] = r;
+      screenBuffer.data[i+1] = g;
+      screenBuffer.data[i+2] = b;
+      screenBuffer.data[i+3] = 0xff;
+
+    }
+
+    const zBufferSize = screenBuffer.width * screenBuffer.height;
+    for(let i = 0; i < zBufferSize; i++){
+      zBuffer[i] = -10000;
+    }
+  }
+
+  function multiplyScalar(v, s){
+    return v.map(x=>x * s);
+  }
+
+  function homogeneousTransform(v){
+    // [x y z w] => [x/w y/w z/w, 1]
+    return multiplyScalar(v, 1/v[3])
+  }
+
+  function getIdentityMatrix(n){
+    let ret = new Array(n*n);
+    for(let i = 0; i < n; i ++){
+      for(let j = 0; j < n; j++){
+        ret[i*n + j] = (i == j)? 1 : 0;
+      }
+    }
+    return ret;
+  }
+
+  function chainMultiplyMatrix(mtxArray) {
+    let ret = mtxArray[0];
+
+    for(let i = 1; i < mtxArray.length; i++)
+      ret = matrixMultiply(ret, mtxArray[i]);
+
+    return ret;
+  }
+
+  function generateImage(wireframe=true){
+
+    // clear background and Z buffer:
+    clear(0x00, 0xff, 0x00);
+
+    if(myMesh == null)
+      return;
+
+    let triangles = [];
+
+    /* the following two lines are equivalent to the matrix transformation applied next
+    let varray = myMesh.vertices.map(v=>homogeneousTransform(vectorMultiply(projectionTransform, v)));
+    varray = varray.map(v=>homogeneousTransform(vectorMultiply(viewportTransform, v)));
+     */
+
+    //multiply first with transform because the vector appears later several times
+
+    let transformsWorldToScreen = chainMultiplyMatrix([viewportTransform, projectionTransform, cameraTransform])
+
+    // tranform the vertices to worldspace and then to screen
+    let varrayW = myMesh.vertices.map(v => homogeneousTransform(vectorMultiply(myMesh.worldTransform, v, true)));
+    let varray = varrayW.map(v => homogeneousTransform(vectorMultiply(transformsWorldToScreen, v, true)));
+
+    // transform the normals to world
+    // isPosition == false so we don't translate
+    let narrayW = myMesh.vnormals.map(v => normalize(vectorMultiply(myMesh.worldTransform, v, false)));
+
+     // each face has 9 indices, only the 0, 3, 6 are vertex index
+    for(let i = 0; i < myMesh.faces.length; i++){
+
+       // index in the vertex buffer
+       let v0 = myMesh.faces[i][0];
+       let v1 = myMesh.faces[i][3];
+       let v2 = myMesh.faces[i][6];
+
+       // texture vertex index
+       let tx0 = myMesh.txcoords[myMesh.faces[i][1]];
+       let tx1 = myMesh.txcoords[myMesh.faces[i][4]];
+       let tx2 = myMesh.txcoords[myMesh.faces[i][7]];
+
+       // vertex normal coords world space
+       let vn0 = narrayW[myMesh.faces[i][2]].slice(0, 3);
+       let vn1 = narrayW[myMesh.faces[i][5]].slice(0, 3);
+       let vn2 = narrayW[myMesh.faces[i][8]].slice(0, 3);
+
+       // world space backface culling
+       let faceNormal = normalize(crossProduct3(
+                      subtractVector(varrayW[v2], varrayW[v0]),
+                      subtractVector(varrayW[v1], varrayW[v0])
+                    ));
+
+       let visible = dot(cameraDir, faceNormal) >= 0;
+
+       if(visible || wireframe) {
+         triangles.push([varray[v0], varray[v1], varray[v2], vn0, vn1, vn2, tx0, tx1, tx2]);
+       }
+
+     }
+
+    if(wireframe) {
+      // TODO: remove duplicated lines, each line is drawn several times
+      for (let i = 0; i < triangles.length; i++) {
+        let t = triangles[i];
+        drawLineV(t[0], t[1], 0xff, 0, 0);
+        drawLineV(t[1], t[2], 0xff, 0, 0);
+        drawLineV(t[2], t[0], 0xff, 0, 0);
+      }
+    }
+    else{
+      for(let i=0; i<triangles.length; i++){
+        let t = triangles[i];
+        drawTriangle(...t);
+      }
+    }
+
+  }
+
+  function render() {
+
+    const c = document.getElementById("myCanvas");
+    const ctx = c.getContext("2d");
+
+    // my render buffer
+    generateImage(false);
+
+    ctx.putImageData(screenBuffer, 0, 0);
+
+  }
+
+  function generateTexturedQuad(mesh){
+    mesh.vertices.push([-1, 1, 0])
+    mesh.vertices.push([-1, -1, 0])
+    mesh.vertices.push([1, 1, 0])
+    mesh.vertices.push([1, -1, 0])
+
+    mesh.faces.push([0, 0, 0, 1, 1, 1, 2, 2, 2], [2, 2, 2, 1, 1, 1, 3, 3, 3]);
+
+    mesh.txcoords.push([0, 1, 0]);
+    mesh.txcoords.push([0, 0, 0]);
+    mesh.txcoords.push([1, 1, 0]);
+    mesh.txcoords.push([1, 0, 0]);
+
+    // all normals pointing towards the camera
+    // in the case when 3d artists are not so kind,
+    // you can recompute the normal vectors as an average of normals to all facets incident to the vertex
+
+    mesh.vnormals.push([0, 0, 1]);
+    mesh.vnormals.push([0, 0, 1]);
+    mesh.vnormals.push([0, 0, 1]);
+    mesh.vnormals.push([0, 0, 1]);
+
+    if(mesh.worldTransform === undefined)
+      mesh.worldTransform = getIdentityMatrix(4);
+
+  }
+
+  async function loadAsset(diffuse, obj) {
+
+    let txt = (await obj.text()).split('\n');
+
+    myMesh = {
+      vertices: [],
+      txcoords: [],
+      vnormals: [],
+      faces: [],
+      diffuse: diffuse,
+      worldTransform: rotateTranslate([0, 1, 0], [1, 0, 1], [0, 0, -2]),
+    };
+
+    //generateTexturedQuad(myMesh);
+    //return;
+
+    txt.forEach((line) => {
+      let ln = line.split(' ').filter( w => w.length > 0);
+
+      if (ln.length === 0) return;
+
+      switch (ln[0]){
+        case "v":
+          myMesh.vertices.push(ln.slice(1).map(parseFloat));
+          break;
+        case "f":
+          // indices start from 1 in the obj file
+          // first index from each triple is the position index
+          myMesh.faces.push(ln.slice(1).flatMap(f=> f.split('/').map(v=>parseFloat(v) - 1.0)));
+          break;
+        case "vn":
+          myMesh.vnormals.push(ln.slice(1).map(parseFloat));
+          break;
+        case "vt":
+          myMesh.txcoords.push(ln.slice(1).map(parseFloat));
+          break;
+        default:
+          console.log("Unknown: " + line);
+      }
+
+    });
+
+  }
+
+  function makeFullScreenCanvas(){
+
+    const cvs = document.getElementById('myCanvas');
+    cvs.width = window.innerWidth;
+    cvs.height = window.innerHeight;
+
+    const ctx = cvs.getContext("2d");
+    screenBuffer = ctx.createImageData(cvs.width, cvs.height);
+    zBuffer = new Float32Array(cvs.width * cvs.height);
+
+    viewportTransform = makeViewportTransform(cvs.width, cvs.height);
+    projectionTransform = makeProjectionTransform(3);
+    cameraTransform = makeCameraTransform([0.2, 0.2, 0.8], [0, 1, 0], [0, 0, 0]);
+
+    render();
+  }
+
+  async function loadImage(str){
+
+    return new Promise((resolve, reject) => {
+      let img = new Image();
+      img.src = str;
+
+      img.onload = function () {
+
+        var canvas = document.createElement('canvas');
+        var context = canvas.getContext('2d');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        context.drawImage(img, 0, 0 );
+        var myData = context.getImageData(0, 0, img.width, img.height);
+
+        resolve(myData);
+
+      }
+    })
+  }
+
+
+  window.onload = function() {
+
+    const p1 = loadImage('./assets/african_head_diffuse.png');
+    const p2 = fetch("./assets/african_head.obj");
+
+    Promise.all([p1, p2]).then(([diffuse, obj]) => {
+      loadAsset(diffuse, obj).then(() => makeFullScreenCanvas());
+    });
+  }
+
+  window.onresize = makeFullScreenCanvas;
+
+
+</script>
+
+</body>
+</html>
